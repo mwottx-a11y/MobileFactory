@@ -586,6 +586,8 @@ export class Renderer {
     this.setGame(game);
     this.resize();
     window.addEventListener('resize', () => this.resize());
+    // iOS reports the new size late on rotation; observing the canvas catches the settled layout.
+    if (window.ResizeObserver) new ResizeObserver(() => this.resize()).observe(canvas);
   }
 
   setGame(g) {
@@ -612,7 +614,7 @@ export class Renderer {
   setIcons(on) { this.showIcons = on; this.iconPool.mesh.visible = on; }
 
   resize() {
-    const w = window.innerWidth, h = window.innerHeight;
+    const w = this.canvas.clientWidth || window.innerWidth, h = this.canvas.clientHeight || window.innerHeight;
     this.r.setSize(w, h, false);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();

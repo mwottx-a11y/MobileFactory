@@ -209,6 +209,9 @@ class App {
   }
 }
 
+// iOS Safari pinch-zooms the whole page unless its proprietary gesture events are cancelled.
+for (const ev of ['gesturestart', 'gesturechange', 'gestureend']) document.addEventListener(ev, (e) => e.preventDefault(), { passive: false });
+
 function load(k, def) { try { const s = localStorage.getItem(k); return s ? JSON.parse(s) : def; } catch { return def; } }
 function store(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { throw e; } }
 
