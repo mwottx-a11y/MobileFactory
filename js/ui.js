@@ -632,6 +632,8 @@ export class UI {
       const W = g.world; let left = 0, types = {};
       for (const i of e.area) if (W.ore[i] && W.ore[i] !== OIL) { left += W.amount[i]; types[ORES[W.ore[i]]] = 1; }
       h += `<div class="row wrap">${Object.keys(types).map(t => chip(t)).join('')}<span class="small">${fmt(left)} ore remaining</span></div>`;
+      const held = Object.entries(e.buf);
+      h += `<div class="row wrap"><span class="small mute">Output buffer</span>${held.map(([k, v]) => chip(k, v)).join('') || '<span class="mute small">empty</span>'}<span class="mute small">/ 10</span></div>`;
       h += `<div class="bar big"><div style="width:${(e.progress * 100).toFixed(0)}%"></div></div><p class="mute small">${fmt(def.speed * e.speedMult() * 60 * (1 + g.bonus.mining + Math.max(0, e.eff.prod)))} ore/min${g.bonus.mining ? ` (incl. +${Math.round(g.bonus.mining * 100)}% mining productivity)` : ''}</p>`;
     }
     if (e.kind === 'pumpjack') h += `<p>Yield ${Math.round(e.yield() * 100)}% → ${fmt(10 * e.yield() * 60 * e.speedMult())} crude/min</p>`;
@@ -695,7 +697,7 @@ export class UI {
     // actions
     const acts = [];
     if (e.kind === 'assembler' || e.kind === 'furnace' || e.kind === 'lab' || e.kind === 'gate') acts.push(`<button class="btn" data-act="fill">⇣ Fill from inventory</button>`);
-    if (e.out || e.inv) acts.push(`<button class="btn" data-act="take">⇡ Take all</button>`);
+    if (e.out || e.inv || e.buf) acts.push(`<button class="btn" data-act="take">⇡ Take all</button>`);
     acts.push(`<button class="btn" data-act="rotate">⟳ Rotate</button>`);
     acts.push(`<button class="btn danger" data-act="pickup">✋ Pick up</button>`);
     h += `<div class="row wrap actions">${acts.join('')}</div>`;
@@ -750,6 +752,7 @@ export class UI {
     if (e.out) { g.giveAll(e.out); for (const k of Object.keys(e.out)) delete e.out[k]; }
     if (e.inv?.items) { g.giveAll(e.inv.items); e.inv.items = {}; }
     else if (e.kind === 'lab') { g.giveAll(e.inv); e.inv = {}; }
+    if (e.kind === 'drill') { g.giveAll(e.buf); e.buf = {}; }
   }
   showRecipeInfo(id) {
     const g = this.app.game;
@@ -768,10 +771,10 @@ function ioHint(e) {
   const fluid = ports ? ` Pipes attach only at its marked ports: ${IN_} in, ${OUT_} out.` : '';
   switch (k) {
     case 'inserter': return `Takes from the ${IN_} tile behind it, drops onto the ${OUT_} tile in front${e.def.reach > 1 ? ' (2 tiles reach)' : ''}. Only moves items the target can use.`;
-    case 'drill': return `Mines the highlighted area and drops ore on the ${OUT_} tile: a belt, chest, furnace, or another burner drill (as fuel).`;
+    case 'drill': return `Mines the highlighted area and drops ore on the ${OUT_} tile: a belt, chest, furnace, or another burner drill (as fuel). It holds up to 10 ore, and inserters can also pull ore out from any side.`;
     case 'furnace': return `Feed ore and fuel with inserters from any side; another inserter takes the plates out. The recipe follows whatever ore arrives.`;
     case 'assembler': return `Inserters feed ingredients from any side and take products out.${fluid}`;
-    case 'lab': return `Inserters feed data from any side. Labs can't pass data to each other.`;
+    case 'lab': return `Inserters feed data from any side, and can pass data on from one lab to the next.`;
     case 'boiler': return `Water enters at the ${IN_} side ports (and passes through to the next boiler); steam leaves at the ${OUT_} top port. Insert fuel from any side.`;
     case 'generator': return `Steam enters at either ${IN_} port and passes through, so engines can be chained end to end.`;
     case 'offshore': return `Draws from the water its ${IN_} arrow faces; water leaves at the ${OUT_} port behind.`;

@@ -5,6 +5,7 @@ import { World, ORES, OIL } from './world.js';
 export const TICK = 1 / 30;
 export const DX = [0, 1, 0, -1], DY = [-1, 0, 1, 0];
 const SP = 0.25; // belt item spacing in tiles
+const DRILL_BUF = 10; // mined items a drill holds before it stops
 const DROP_POS = [0.5, 0.375, 0.625, 0.25, 0.75, 0.125, 0.875];
 const STEAM_KJ = 30; // energy per unit of steam
 
@@ -416,6 +417,13 @@ class Lab extends Entity {
   constructor(g, type, x, y, rot) { super(g, type, x, y, rot); this.inv = {}; this.progress = 0; this.unit = null; }
   wants(id) { return id && PACKS.includes(id) ? Math.max(0, 10 - (this.inv[id] || 0)) : 0; }
   insert(id, n) { const k = Math.min(n, this.wants(id)); if (k > 0) addTo(this.inv, id, k); return k; }
+  // Inserters can pass data on from one lab to the next.
+  extract(want, max) {
+    for (const [id, n] of Object.entries(this.inv)) {
+      if (n > 0 && want(id)) { const k = Math.min(n, lim(max, id)); this.inv[id] -= k; if (!this.inv[id]) delete this.inv[id]; return { id, n: k }; }
+    }
+    return null;
+  }
   contents() { return mergeInto(super.contents(), this.inv); }
   tick(g) {
     const tid = g.research.current;
@@ -438,7 +446,7 @@ class Lab extends Entity {
 }
 
 class Drill extends Entity {
-  constructor(g, type, x, y, rot) { super(g, type, x, y, rot); this.progress = 0; this.buf = null; this.prodBar = 0; this.rr = 0; this.computeArea(); }
+  constructor(g, type, x, y, rot) { super(g, type, x, y, rot); this.progress = 0; this.buf = {}; this.prodBar = 0; this.rr = 0; this.computeArea(); }
   computeArea() {
     const a = this.def.area, off = (a - this.def.size[0]) / 2;
     const cx = this.x - off, cy = this.y - off;
@@ -449,18 +457,26 @@ class Drill extends Entity {
     }
   }
   outTile() { const [w] = this.def.size; return this.local(Math.floor((w - 1) / 2), -1); }
+  stored() { let t = 0; for (const n of Object.values(this.buf)) t += n; return t; }
+  // Push one item onto whatever sits on the output tile.
   tryOutput(g) {
+    const id = Object.keys(this.buf)[0];
+    if (!id) return;
     const [ox, oy] = this.outTile();
     const t = g.entityAt(ox, oy);
-    if (!t) return false;
-    if (BELTLIKE.has(t.kind)) return laneDrop(t.laneAt(ox, oy), this.buf.id) ? 1 : 0;
-    return t.insert(this.buf.id, 1);
+    if (!t) return;
+    const ok = BELTLIKE.has(t.kind) ? (laneDrop(t.laneAt(ox, oy), id) ? 1 : 0) : t.insert(id, 1);
+    if (ok) this.take(id, 1);
+  }
+  take(id, n) { const k = Math.min(n, this.buf[id] || 0); this.buf[id] -= k; if (!this.buf[id]) delete this.buf[id]; return k; }
+  // Inserters may pull mined ore straight out of the drill.
+  extract(want, max) {
+    for (const id of Object.keys(this.buf)) if (want(id)) return { id, n: this.take(id, lim(max, id)) };
+    return null;
   }
   tick(g) {
-    if (this.buf) {
-      if (this.tryOutput(g)) { this.buf.n--; if (!this.buf.n) this.buf = null; }
-      if (this.buf) { this.status = 'output full'; this.active = false; return; }
-    }
+    if (this.stored()) this.tryOutput(g);
+    if (this.stored() >= DRILL_BUF) { this.status = 'output full'; this.active = false; return; }
     const W = g.world;
     let ore = -1;
     for (let k = 0; k < this.area.length; k++) {
@@ -482,13 +498,17 @@ class Drill extends Entity {
       let n = 1;
       this.prodBar += g.bonus.mining + Math.max(0, this.eff.prod);
       while (this.prodBar >= 1) { this.prodBar -= 1; n++; }
-      this.buf = { id, n };
+      addTo(this.buf, id, n);
       g.stat(id, n);
     }
   }
-  contents() { const c = super.contents(); if (this.buf) addTo(c, this.buf.id, this.buf.n); return c; }
+  contents() { return mergeInto(super.contents(), this.buf); }
   save() { return { ...super.save(), progress: this.progress, buf: this.buf, prodBar: this.prodBar }; }
-  load(s) { super.load(s); this.progress = s.progress || 0; this.buf = s.buf || null; this.prodBar = s.prodBar || 0; }
+  load(s) {
+    super.load(s); this.progress = s.progress || 0; this.prodBar = s.prodBar || 0;
+    const b = s.buf;
+    this.buf = !b ? {} : b.id ? { [b.id]: b.n } : b; // older saves stored a single {id, n}
+  }
 }
 
 class Pumpjack extends Entity {
