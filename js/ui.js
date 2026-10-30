@@ -306,6 +306,7 @@ export class UI {
       case 'newgame': this.confirm('Start a new game? Your current factory will be lost unless exported.', () => app.newGame(+($('#seed-in')?.value) || undefined)); return;
       case 'speed': app.speed = +v; break;
       case 'grid': app.settings.grid = !app.settings.grid; app.applySettings(); break;
+      case 'set': app.settings[v] = !app.settings[v]; app.applySettings(); break;
       case 'help': this.openPanel('help'); return;
       case 'bpuse': app.useBlueprint(+v); this.closePanel(); return;
       case 'bpdel': app.blueprints.splice(+v, 1); app.saveBlueprints(); break;
@@ -527,7 +528,7 @@ export class UI {
       <button class="btn wide" data-act="save">💾 Save now</button>
       <div class="row"><button class="btn" data-act="export">⬆ Export save</button><button class="btn" data-act="import">⬇ Import save</button></div>
       <h4>Game speed</h4><div class="row">${[1, 2, 4].map(s => `<button class="btn ${app.speed === s ? 'primary' : ''}" data-act="speed" data-v="${s}">${s}×</button>`).join('')}</div>
-      <h4>Display</h4><div class="row"><button class="btn ${app.settings.grid ? 'primary' : ''}" data-act="grid">Grid overlay</button></div>
+      <h4>Display</h4><div class="row"><button class="btn ${app.settings.grid ? 'primary' : ''}" data-act="grid">Grid overlay</button><button class="btn ${app.settings.icons ? 'primary' : ''}" data-act="set" data-v="icons">Recipe icons</button><button class="btn ${app.settings.shadows ? 'primary' : ''}" data-act="set" data-v="shadows">Shadows</button></div><p class="mute small">Turn shadows off if the game stutters on your phone.</p>
       <h4>Blueprints</h4><div class="row"><button class="btn" data-open="blueprints">📐 Blueprint library (${app.blueprints.length})</button></div>
       <h4>New game</h4><div class="row"><input id="seed-in" class="num" placeholder="seed (optional)"><button class="btn danger" data-act="newgame">Start over</button></div>
       <div class="row"><button class="btn wide" data-act="help">❓ How to play</button></div>
@@ -552,8 +553,9 @@ export class UI {
       <ul><li>Drills and inserters output toward the arrow. Inserters take from behind and drop in front, only what the target needs.</li>
       <li>Furnaces choose a recipe from their input. Assemblers need a recipe set.</li>
       <li>Burner machines need fuel (coal, tar, solid fuel). Electric ones need a Utility Pole covering them, linked to generators.</li>
+      <li><b>Arrow colours:</b> <span style="color:#2fd0ff">cyan</span> marks where things go in, <span style="color:#ff8a1f">orange</span> where they come out — on inserters, drill chutes, tunnels, splitters and every fluid port. Selecting or placing a building also highlights the exact tiles it reads from and writes to.</li>
       <li>Status lights: <span class="ok">green</span> working, <span class="warn">yellow</span> waiting, <span class="bad">red</span> no power/fuel, orange output full.</li>
-      <li>Pipes join everything adjacent; each network holds a single fluid. Keep different fluids apart, or cross with Pipe Tunnels. Blue nubs are fluid inputs, orange are outputs.</li>
+      <li>Pipes join everything adjacent; each network holds a single fluid. Keep different fluids apart, or cross with Pipe Tunnels. Fluid ports have raised markers: cyan inputs, orange outputs.</li>
       <li>Splitters balance belts; set a filter or priority to sort. Belts side-load when they meet another belt from the side.</li>
       <li>Modules: Speed (faster, hungrier), Productivity (free extra output, intermediates only), Efficiency (less power). Beacons share half their module effect with neighbours (no productivity).</li>
       <li>Uplink chests send items straight to your inventory; Downlink chests pull from it. Use them to automate your own building supply.</li>
@@ -609,7 +611,9 @@ export class UI {
     const def = e.def;
     const [stT, stC] = STATUS_TEXT[e.status] || [e.status, 'mute'];
     let h = `<div class="status ${stC}">● ${stT}</div>`;
-    if (def.desc) h += `<p class="mute small">${esc(def.desc)}</p>`;
+    const flow = ioHint(e);
+    if (flow) h += `<p class="flow small">${flow}</p>`;
+    else if (def.desc) h += `<p class="mute small">${esc(def.desc)}</p>`;
     // recipe
     if (e.kind === 'assembler') {
       const r = e.recipe && RECIPES[e.recipe];
@@ -755,6 +759,30 @@ export class UI {
     const where = r.cat === 'smelt' ? 'Furnace' : r.cat === 'chem' ? 'Chemical Plant' : r.cat === 'refine' ? 'Oil Refinery' : r.cat === 'craft-fluid' ? 'Assembler II+' : 'Assembler or by hand';
     const tech = Object.entries(TECHS).find(([, t]) => t.unlocks.includes(rid));
     this.modal(`<h3>${iconImg(id)} ${esc(nameOf(id))}</h3><div class="io"><div>${Object.entries(r.in).map(([k, v]) => chip(k, v)).join('')}</div><span class="arrow">→</span><div>${Object.entries(r.out).map(([k, v]) => chip(k, v)).join('')}</div></div><p class="small">${r.time}s · made in ${where}${g.unlocked.has(rid) ? '' : ` · <span class="bad">locked</span>${tech ? ` (${esc(tech[1].name)})` : ''}`}</p><div class="row end"><button class="btn primary" data-m="ok">OK</button></div>`);
+  }
+}
+const IN_ = '<b class="cin">cyan</b>', OUT_ = '<b class="cout">orange</b>';
+// Plain-language description of how a building connects, using the in-world colour markers.
+function ioHint(e) {
+  const k = e.kind, ports = e.def.ports;
+  const fluid = ports ? ` Pipes attach only at its marked ports: ${IN_} in, ${OUT_} out.` : '';
+  switch (k) {
+    case 'inserter': return `Takes from the ${IN_} tile behind it, drops onto the ${OUT_} tile in front${e.def.reach > 1 ? ' (2 tiles reach)' : ''}. Only moves items the target can use.`;
+    case 'drill': return `Mines the highlighted area and drops ore on the ${OUT_} tile: a belt, chest, furnace, or another burner drill (as fuel).`;
+    case 'furnace': return `Feed ore and fuel with inserters from any side; another inserter takes the plates out. The recipe follows whatever ore arrives.`;
+    case 'assembler': return `Inserters feed ingredients from any side and take products out.${fluid}`;
+    case 'lab': return `Inserters feed data from any side. Labs can't pass data to each other.`;
+    case 'boiler': return `Water enters at the ${IN_} side ports (and passes through to the next boiler); steam leaves at the ${OUT_} top port. Insert fuel from any side.`;
+    case 'generator': return `Steam enters at either ${IN_} port and passes through, so engines can be chained end to end.`;
+    case 'offshore': return `Draws from the water its ${IN_} arrow faces; water leaves at the ${OUT_} port behind.`;
+    case 'pumpjack': return `Crude oil leaves at the ${OUT_} port.`;
+    case 'belt': return `Carries items toward its arrows. Feeding into a belt's side merges onto it.`;
+    case 'underground': return e.mode === 'in' ? `Tunnel entrance (${IN_}): items dive under and reappear at the paired exit.` : `Tunnel exit (${OUT_}): items surface here and continue forward.`;
+    case 'splitter': return `Takes two belts from behind (${IN_}) and shares items across both outputs (${OUT_}).`;
+    case 'chest': return `Inserters can put items in or take them out from any side.`;
+    case 'uplink': return `Anything inserted goes straight into your inventory.`;
+    case 'downlink': return `Pulls the chosen item from your inventory; inserters take it out.`;
+    default: return null;
   }
 }
 function pct(v) { return (v > 0 ? '+' : '') + Math.round(v * 100) + '%'; }

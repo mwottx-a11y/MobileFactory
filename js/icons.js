@@ -213,6 +213,19 @@ function drawBuilding(x, id) {
   }
 }
 
+const canvases = new Map();
+// Raw 64px canvas for an icon (used to build the in-world texture atlas).
+export function iconCanvas(id) {
+  if (canvases.has(id)) return canvases.get(id);
+  const c = document.createElement('canvas'); c.width = c.height = SZ;
+  const x = c.getContext('2d');
+  if (FLUIDS[id]) drawShape(x, 'fluid', FLUIDS[id].color, id);
+  else if (BUILDINGS[id]) drawBuilding(x, id);
+  else if (ITEMS[id]) drawShape(x, ITEMS[id].shape, ITEMS[id].color, id);
+  canvases.set(id, c);
+  return c;
+}
+
 export function iconURL(id) {
   if (cache.has(id)) return cache.get(id);
   const c = document.createElement('canvas'); c.width = c.height = SZ;

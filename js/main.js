@@ -16,7 +16,7 @@ class App {
     this.speed = 1; this.paused = false;
     this.blueprint = null; this.pasteAnchor = null; this.pasteLocked = false;
     this.blueprints = load(BP_KEY, []);
-    this.settings = load(SET_KEY, { grid: false });
+    this.settings = { grid: false, shadows: true, icons: true, ...load(SET_KEY, {}) };
     let game = null;
     const saved = load(SAVE_KEY, null);
     if (saved) { try { game = Game.deserialize(saved); } catch (e) { console.error('Load failed', e); } }
@@ -202,8 +202,10 @@ class App {
     this.setTool('inspect');
   }
   applySettings() {
-    store(SET_KEY, this.settings);
+    try { store(SET_KEY, this.settings); } catch { }
     this.renderer.setGrid(this.settings.grid || this.tool === 'build');
+    if (this.renderer.r.shadowMap.enabled !== this.settings.shadows) this.renderer.setShadows(this.settings.shadows);
+    this.renderer.setIcons(this.settings.icons);
   }
 }
 

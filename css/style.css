@@ -195,3 +195,6 @@ table.stats td b { position: relative; }
 .bpicons img.ic { width: 22px; height: 22px; }
 .menu .row input { flex: 1; }
 .help ul { padding-left: 18px; margin: 4px 0; } .help li { margin: 4px 0; }
+
+.flow { color: #c9d1dc; background: #10141a; border-radius: 8px; padding: 6px 9px; margin: 6px 0; }
+.cin { color: #2fd0ff; } .cout { color: #ff8a1f; }
