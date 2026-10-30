@@ -19,7 +19,7 @@ The game autosaves to `localStorage` every minute and when the tab is hidden. Sa
 
 **Resources** — iron, copper, coal, stone, quartz, bauxite (solids), crude oil seeps and water (fluids). Ore patches deplete; richer patches lie further from spawn.
 
-**Production chains** — 90+ recipes across five machine categories (hand/assembler, fluid assembler, furnace, chemical plant, refinery). Oil refining produces **tar as a solid by-product** that will back up your refinery unless you burn it, turn it into solid fuel or lubricant, or crack it back into gas.
+**Production chains** — ~90 recipes across five machine categories (hand/assembler, fluid assembler, furnace, chemical plant, refinery). Oil refining produces **tar as a solid by-product** that will back up your refinery unless you burn it, turn it into solid fuel or lubricant, or crack it back into gas.
 
 **Five data types** — Kinetic → Logistic → Chemical → Structural → Quantum, each requiring a substantially deeper production chain than the last.
 
