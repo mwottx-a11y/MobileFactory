@@ -1,0 +1,9 @@
+{
+  "name": "Resonance Works",
+  "short_name": "Resonance",
+  "start_url": "./index.html",
+  "display": "fullscreen",
+  "orientation": "any",
+  "background_color": "#14171c",
+  "theme_color": "#14171c"
+}

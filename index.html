@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#14171c">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Resonance Works</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="hud">
+  <div id="top">
+    <button id="research-mini" data-open="research"></button>
+    <div id="power-mini" hidden></div>
+    <span id="clock"></span><span id="speed-mini"></span>
+    <div class="spacer"></div>
+    <button class="ibtn" data-open="stats" title="Statistics (P)">📊</button>
+    <button class="ibtn" data-open="menu" title="Menu">☰</button>
+  </div>
+  <div id="objective"></div>
+  <div id="toasts"></div>
+  <div id="build-indicator" hidden></div>
+  <div id="pastebar" hidden>
+    <button data-paste="place" class="primary">✓ Place</button>
+    <button data-paste="rot">⟳</button>
+    <button data-paste="lib">📐</button>
+    <button data-paste="cancel">✕</button>
+  </div>
+  <div id="bottom">
+    <div id="craftq"></div>
+    <div id="hotbar"></div>
+    <div id="toolbar">
+      <button data-tool="inspect" title="Inspect"><span>👆</span><small>Inspect</small></button>
+      <button data-tool="build" title="Build (B)"><span>🔨</span><small>Build</small></button>
+      <button data-tool="rotate" title="Rotate (R)"><span class="rot-arrow">⬆</span><small>Rotate</small></button>
+      <button data-tool="copy" title="Copy (C)"><span>✂</span><small>Copy</small></button>
+      <button data-tool="paste" title="Paste (V)"><span>📋</span><small>Paste</small></button>
+      <button data-tool="remove" title="Remove (X)"><span>🗑</span><small>Remove</small></button>
+      <button data-open="craft" title="Craft (E)"><span>🛠</span><small>Craft</small></button>
+      <button data-open="research" title="Research (T)"><span>🔬</span><small>Research</small></button>
+    </div>
+  </div>
+</div>
+
+<div id="sheet" class="sheet" hidden>
+  <div class="sheet-head"><span class="sheet-title"></span><button class="close" aria-label="Close">✕</button></div>
+  <div class="sheet-body"></div>
+</div>
+<div id="modal" hidden></div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
