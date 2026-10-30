@@ -563,7 +563,7 @@ export class UI {
     const s = JSON.stringify(this.app.game.serialize());
     const b64 = btoa(unescape(encodeURIComponent(s)));
     this.modal(`<h3>Export save</h3><textarea readonly class="ta">${b64}</textarea><div class="row end"><button class="btn" data-m="copy">Copy</button><button class="btn primary" data-m="ok">Close</button></div>`,
-      { copy: () => { navigator.clipboard?.writeText(b64); this.toast('Copied'); }, ok: () => this.closeModal() });
+      { copy: () => { const ta = $('.modal-card .ta'); Promise.resolve(navigator.clipboard?.writeText(b64)).then(() => this.toast('Copied')).catch(() => { ta.select(); this.toast('Press copy on the selected text'); }); }, ok: () => this.closeModal() });
   }
   importSave() {
     this.modal(`<h3>Import save</h3><textarea class="ta" id="imp"></textarea><div class="row end"><button class="btn" data-m="no">Cancel</button><button class="btn primary" data-m="go">Load</button></div>`,

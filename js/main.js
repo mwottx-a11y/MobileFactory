@@ -145,7 +145,7 @@ class App {
     const counts = {};
     for (const e of this.blueprint.ents) counts[e.type] = (counts[e.type] || 0) + 1;
     const main = Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
-    const name = prompt('Blueprint name', `${BUILDINGS[main].name} block`) || 'Blueprint';
+    const name = `${BUILDINGS[main].name} block ${this.blueprint.w}×${this.blueprint.h}`;
     this.blueprints.unshift({ ...this.blueprint, name });
     this.saveBlueprints();
     this.ui.toast('Blueprint saved');
@@ -210,4 +210,11 @@ class App {
 function load(k, def) { try { const s = localStorage.getItem(k); return s ? JSON.parse(s) : def; } catch { return def; } }
 function store(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { throw e; } }
 
-new App();
+// Boot; inside an artifact viewer, keep the running factory across page updates.
+const hot = window.claude?.hot;
+const start = (data) => {
+  if (data?.save) { try { localStorage.setItem(SAVE_KEY, JSON.stringify(data.save)); } catch { } }
+  const app = new App();
+  hot?.snapshot?.(() => ({ save: app.game.serialize() }));
+};
+if (hot?.ready) hot.ready(start); else start(hot?.data ?? {});
