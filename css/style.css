@@ -46,12 +46,16 @@ small { font-size: 0.8em; }
 .toast.out { opacity: 0; transform: translateY(-8px); }
 .toast img.ic { width: 20px; height: 20px; }
 
-#build-indicator { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(150px + var(--safe-b)); background: var(--panel); border: 1px solid var(--acc); border-radius: 20px; padding: 5px 6px 5px 14px; font-size: 13px; display: flex; align-items: center; gap: 8px; white-space: nowrap; }
-#build-indicator small { color: var(--mute); }
-#build-indicator button { width: 28px; height: 28px; border-radius: 14px; background: var(--panel2); }
-#pastebar { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(150px + var(--safe-b)); display: flex; gap: 6px; background: var(--panel); border: 1px solid var(--blue); border-radius: 14px; padding: 6px; }
-#pastebar button { min-width: 48px; height: 44px; border-radius: 10px; background: var(--panel2); font-size: 16px; padding: 0 12px; }
-#pastebar button.primary { background: var(--blue); color: #fff; font-weight: 600; }
+/* contextual action bar: what the current tool will do, and the button that does it */
+#actionbar { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(150px + var(--safe-b)); display: flex; align-items: center; gap: 6px; background: var(--panel); border: 1px solid var(--acc); border-radius: 16px; padding: 6px; max-width: calc(100vw - 16px); box-shadow: 0 6px 20px #0008; }
+#actionbar .ab-label { display: flex; align-items: center; gap: 6px; padding: 0 4px 0 2px; font-size: 13px; white-space: nowrap; min-width: 0; }
+#actionbar .ab-label img { width: 28px; height: 28px; }
+#actionbar .ab-label small { color: var(--mute); }
+#actionbar .ab-hint { font-size: 11.5px; color: var(--mute); line-height: 1.2; max-width: 130px; }
+#actionbar button { min-width: 46px; height: 46px; border-radius: 11px; background: var(--panel2); font-size: 15px; padding: 0 12px; white-space: nowrap; }
+#actionbar button.primary { background: var(--acc); color: #1a1408; font-weight: 700; min-width: 96px; }
+#actionbar button.danger { background: #8a2a25; color: #fff; font-weight: 700; }
+#actionbar button.blue { background: var(--blue); color: #fff; font-weight: 700; }
 
 #bottom { position: absolute; left: 0; right: 0; bottom: 0; padding: 0 6px calc(6px + var(--safe-b)); display: flex; flex-direction: column; gap: 6px; align-items: center; pointer-events: none; }
 #bottom > * { pointer-events: auto; }
@@ -198,3 +202,30 @@ table.stats td b { position: relative; }
 
 .flow { color: #c9d1dc; background: #10141a; border-radius: 8px; padding: 6px 9px; margin: 6px 0; }
 .cin { color: #2fd0ff; } .cout { color: #ff8a1f; }
+
+/* crafting list */
+.craft-top { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; }
+.craft-top input { flex: 1; min-width: 0; background: #0f1217; border: 1px solid var(--line); color: var(--text); border-radius: 10px; padding: 9px 10px; font: inherit; user-select: text; -webkit-user-select: text; }
+.cq { display: flex; gap: 5px; overflow-x: auto; margin-bottom: 8px; scrollbar-width: none; }
+.cq:empty { display: none; }
+.cq .qi { flex: none; }
+.clist { display: flex; flex-direction: column; gap: 5px; }
+.crow { display: flex; align-items: center; gap: 8px; background: var(--panel2); border: 1px solid var(--line); border-radius: 12px; padding: 6px 6px 6px 8px; }
+.crow.none { opacity: 0.55; }
+.crow > img.ic { width: 38px; height: 38px; flex: none; }
+.crow .cinfo { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; text-align: left; }
+.crow .cname { font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.crow .cname small { font-weight: 400; color: var(--mute); }
+.crow .cings { display: flex; flex-wrap: wrap; gap: 3px; }
+.crow .cings .chip { padding: 1px 6px 1px 2px; font-size: 11.5px; }
+.crow .cings .chip img.ic { width: 18px; height: 18px; }
+.chip.auto { border-color: #8a7a2a; color: var(--warn); }
+.crow .cbtns { display: flex; gap: 4px; flex: none; }
+.crow .cbtns button { width: 46px; height: 42px; border-radius: 10px; background: #3a3220; color: var(--acc); font-weight: 700; font-size: 14px; border: 1px solid #5a4a20; }
+.crow.none .cbtns button { background: #262a31; color: var(--mute); border-color: var(--line); }
+.crow .cmach { font-size: 11px; color: var(--mute); flex: none; text-align: right; max-width: 90px; }
+.clegend { display: flex; gap: 10px; flex-wrap: wrap; font-size: 11px; color: var(--mute); margin: 8px 2px 2px; }
+.clegend i { display: inline-block; width: 9px; height: 9px; border-radius: 3px; margin-right: 4px; vertical-align: -1px; }
+.take-top { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
+.btn.take { background: var(--ok); border-color: var(--ok); color: #082010; font-weight: 700; }
+button.chip { font: inherit; color: inherit; }

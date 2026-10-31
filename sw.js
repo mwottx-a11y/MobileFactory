@@ -1,6 +1,6 @@
 // Network-first cache: fetch fresh files (bypassing GitHub Pages' 10-minute cache) and fall back to
 // the last copy when offline. Bump CACHE to drop old copies entirely.
-const CACHE = 'resonance-v1';
+const CACHE = 'resonance-v2';
 
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) => e.waitUntil(

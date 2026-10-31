@@ -3,6 +3,7 @@ import { BUILDINGS } from './data.js';
 import { rotSize, DX, DY, entitySettings, BELTLIKE } from './sim.js';
 
 const TAP_PX = 10;
+const LONG_PRESS_MS = 420;
 
 export class Input {
   constructor(app) {
@@ -29,10 +30,16 @@ export class Input {
     if (before && after) { this.r.target.x += before.x - after.x; this.r.target.z += before.z - after.z; }
   }
 
+  // Touch tools never act on a single touch: a tap positions a ghost/selection and a second tap
+  // (or the ✓ button) confirms. One-finger drags pan unless they start on the pending ghost, which
+  // extends it. Mouse input is precise, so it keeps direct click/drag placement.
+  isTouchTool(e) { return e.pointerType !== 'mouse' && ['build', 'remove', 'copy', 'paste'].includes(this.app.tool); }
+
   down(e) {
-    this.app.ui.blurPanels?.();
     this.r.canvas.setPointerCapture?.(e.pointerId);
-    this.ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, t: performance.now(), btn: e.button, type: e.pointerType });
+    this.app.pointer = e.pointerType === 'mouse' ? 'mouse' : 'touch';
+    this.ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, ts: e.timeStamp, btn: e.button, type: e.pointerType });
+    this.clearLongPress();
     if (this.ptrs.size === 2) {
       // switch to pinch; abort single-finger action
       this.cancelGesture();
@@ -45,14 +52,39 @@ export class Input {
     const tool = this.app.tool;
     const tile = this.r.screenToTile(e.clientX, e.clientY);
     if (!tile) return;
-    if (e.button === 2 || e.button === 1 || (tool === 'inspect') ) {
-      this.gesture = { type: 'pan', anchor: this.r.screenToWorld(e.clientX, e.clientY), btn: e.button, tap: true, start: tile };
+    const pan = () => ({ type: 'pan', anchor: this.r.screenToWorld(e.clientX, e.clientY), btn: e.button, tap: true, start: tile });
+    if (e.button === 2 || e.button === 1) { this.gesture = pan(); return; }
+    if (this.isTouchTool(e)) {
+      this.gesture = this.hitPending(tile) ? { type: 'edit', tap: true, start: tile } : { ...pan(), place: true };
+      if (this.gesture.type === 'pan') this.armLongPress(tile);
       return;
     }
+    if (tool === 'inspect') { this.gesture = pan(); this.armLongPress(tile); return; }
+    // mouse: direct placement
     if (tool === 'build') this.gesture = { type: 'line', start: tile, end: tile, axis: null, tap: true };
     else if (tool === 'remove' || tool === 'copy') this.gesture = { type: 'rect', start: tile, end: tile, tap: true };
     else if (tool === 'paste') { this.gesture = { type: 'paste', tap: true }; this.app.setPasteAnchor(tile); }
     this.updatePreview();
+  }
+
+  // Long-press a building to take its output; keep holding and slide to sweep across several.
+  // The decision uses event timestamps (when the finger actually moved or lifted), so a janky
+  // frame can't turn a quick tap into a collect. The timer only shows that the hold registered.
+  armLongPress(tile) {
+    this.lpTimer = setTimeout(() => {
+      const G = this.gesture;
+      const e = G && G.type === 'pan' && G.tap && this.g.entityAt(tile[0], tile[1]);
+      if (e) { G.lpShown = true; this.r.setSelection(e); }
+    }, LONG_PRESS_MS);
+  }
+  clearLongPress() { clearTimeout(this.lpTimer); }
+  startCollect(G, p) {
+    const e = this.g.entityAt(G.start[0], G.start[1]);
+    if (!e) return false;
+    this.gesture = { type: 'collect', seen: new Set([e.id]) };
+    this.app.collect(e);
+    this.r.setSelection(e);
+    return true;
   }
 
   move(e) {
@@ -61,7 +93,12 @@ export class Input {
     p.x = e.clientX; p.y = e.clientY;
     const G = this.gesture;
     if (!G) return;
-    if (Math.hypot(p.x - p.sx, p.y - p.sy) > TAP_PX) G.tap = false;
+    if (G.tap && Math.hypot(p.x - p.sx, p.y - p.sy) > TAP_PX) {
+      // a drag that starts after a long hold sweeps-collects instead of panning
+      if (G.type === 'pan' && e.timeStamp - p.ts >= LONG_PRESS_MS && this.startCollect(G, p)) return;
+      G.tap = false;
+      if (G.type === 'pan') { this.clearLongPress(); if (G.lpShown) this.r.setSelection(null); }
+    }
     if (G.type === 'pinch' && this.ptrs.size >= 2) {
       const [a, b] = [...this.ptrs.values()];
       const span = Math.hypot(a.x - b.x, a.y - b.y);
@@ -81,6 +118,26 @@ export class Input {
     }
     const tile = this.r.screenToTile(p.x, p.y);
     if (!tile) return;
+    if (G.type === 'collect') {
+      const ent = this.g.entityAt(tile[0], tile[1]);
+      if (ent && !G.seen.has(ent.id)) { G.seen.add(ent.id); this.app.collect(ent, true); this.r.setSelection(ent); }
+      return;
+    }
+    if (G.type === 'edit') {
+      if (G.tap) return; // ignore jitter until it is clearly a drag
+      const P = this.app.pending, tool = this.app.tool;
+      if (tool === 'paste') this.app.setPasteAnchor(tile);
+      else if (P) {
+        P.end = tile;
+        if (tool === 'build') {
+          const dx = tile[0] - P.start[0], dy = tile[1] - P.start[1];
+          if (!dx && !dy) P.axis = null;
+          else if (!P.axis) P.axis = Math.abs(dx) >= Math.abs(dy) ? 'x' : 'y';
+        }
+      }
+      this.updatePreview(); this.app.renderActionBar();
+      return;
+    }
     if (G.type === 'line') {
       G.end = tile;
       const dx = tile[0] - G.start[0], dy = tile[1] - G.start[1];
@@ -92,6 +149,7 @@ export class Input {
 
   hover(e) {
     if (e.pointerType !== 'mouse') return;
+    this.app.pointer = 'mouse';
     const tool = this.app.tool;
     if (tool !== 'build' && tool !== 'paste') return;
     const tile = this.r.screenToTile(e.clientX, e.clientY);
@@ -105,18 +163,23 @@ export class Input {
     const p = this.ptrs.get(e.pointerId);
     if (!p) return;
     this.ptrs.delete(e.pointerId);
+    this.clearLongPress();
     const G = this.gesture;
     if (!G) return;
     if (G.type === 'pinch') { if (this.ptrs.size === 0) this.gesture = null; return; }
     this.gesture = null;
     if (cancelled) { this.updatePreview(); return; }
     const app = this.app;
-    if (G.type === 'pan') {
-      if (G.tap && G.btn === 0) app.inspectTile(G.start);
+    if (G.type === 'pan' && G.tap && G.btn === 0 && e.timeStamp - p.ts >= LONG_PRESS_MS && this.startCollect(G, p)) { this.gesture = null; G.type = 'collect'; }
+    if (G.type === 'collect') { setTimeout(() => { if (app.ui.panel !== 'entity') this.r.setSelection(null); }, 300); return; }
+    if (G.type === 'edit') {
+      if (G.tap) app.confirmPending(); // second tap on the ghost/selection confirms it
+    } else if (G.type === 'pan') {
+      if (G.tap && G.place) app.setPending(G.start);
+      else if (G.tap && G.btn === 0) app.inspectTile(G.start);
       else if (G.tap && G.btn === 2 && app.tool !== 'inspect') app.setTool('inspect');
     } else if (G.type === 'line') {
-      const list = this.linePlan(G);
-      app.placeMany(list);
+      app.placeMany(this.linePlan(G));
     } else if (G.type === 'rect') {
       const r = rectOf(G.start, G.end);
       if (app.tool === 'remove') app.removeRect(r, G.tap);
@@ -127,7 +190,35 @@ export class Input {
     this.updatePreview();
   }
 
-  cancelGesture() { this.gesture = null; this.r.setRect(null); this.updatePreview(); }
+  cancelGesture() { this.clearLongPress(); this.gesture = null; this.r.setRect(null); this.updatePreview(); }
+
+  // ----- pending (touch) actions -----
+  pendingList() {
+    const P = this.app.pending;
+    if (!P || !P.start) return [];
+    return this.linePlan({ start: P.start, end: P.end, axis: P.axis, tap: P.start[0] === P.end[0] && P.start[1] === P.end[1] });
+  }
+  pendingRect() {
+    const P = this.app.pending;
+    if (!P || !P.base) return null;
+    const b = P.base, [ex, ey] = P.end;
+    const x0 = Math.min(b.x, ex), y0 = Math.min(b.y, ey), x1 = Math.max(b.x + b.w - 1, ex), y1 = Math.max(b.y + b.h - 1, ey);
+    return { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
+  }
+  hitPending([x, y]) {
+    const app = this.app, tool = app.tool;
+    if (tool === 'paste') {
+      if (!app.blueprint || !app.pasteAnchor) return false;
+      const [ax, ay] = app.pasteAnchor;
+      return x >= ax && y >= ay && x < ax + app.blueprint.w && y < ay + app.blueprint.h;
+    }
+    if (!app.pending) return false;
+    if (tool === 'build') {
+      return this.pendingList().some(it => { const [w, h] = rotSize(it.type, it.rot); return x >= it.x && y >= it.y && x < it.x + w && y < it.y + h; });
+    }
+    const r = this.pendingRect();
+    return r && x >= r.x && y >= r.y && x < r.x + r.w && y < r.y + r.h;
+  }
 
   // Compute placement plan for a drag line (straight or L-shaped).
   linePlan(G) {
@@ -183,7 +274,8 @@ export class Input {
     if (app.tool === 'build' && app.buildType) {
       let list;
       if (G && G.type === 'line') list = this.linePlan(G);
-      else if (this.hoverTile) list = this.linePlan({ start: this.hoverTile, end: this.hoverTile, tap: true });
+      else if (app.pending) list = this.pendingList();
+      else if (this.hoverTile && app.pointer === 'mouse') list = this.linePlan({ start: this.hoverTile, end: this.hoverTile, tap: true });
       else list = [];
       const def = BUILDINGS[app.buildType];
       r.setPreview(list.map((it, i) => {
@@ -204,7 +296,9 @@ export class Input {
       r.setRect(null);
     } else {
       r.setPreview(null);
-      if (G && G.type === 'rect') r.setRect(rectOf(G.start, G.end), app.tool === 'copy' ? '#5ab0ff' : '#ff5a5a');
+      const col = app.tool === 'copy' ? '#5ab0ff' : '#ff5a5a';
+      if (G && G.type === 'rect') r.setRect(rectOf(G.start, G.end), col);
+      else if (app.pending && (app.tool === 'remove' || app.tool === 'copy')) r.setRect(this.pendingRect(), col);
       else r.setRect(null);
     }
   }
@@ -215,7 +309,8 @@ export class Input {
     const k = e.key.toLowerCase();
     const pan = 3 + this.r.dist * 0.08;
     if (k === 'r') app.rotate();
-    else if (k === 'escape' || k === 'q') { if (app.ui.panelOpen()) app.ui.closePanel(); else app.setTool('inspect'); }
+    else if (k === 'escape' || k === 'q') { if (app.ui.panelOpen()) app.ui.closePanel(); else if (app.pending) app.actionBar('clear'); else app.setTool('inspect'); }
+    else if (k === 'enter') app.confirmPending();
     else if (k === 'e') app.ui.toggle('craft');
     else if (k === 't') app.ui.toggle('research');
     else if (k === 'p') app.ui.toggle('stats');

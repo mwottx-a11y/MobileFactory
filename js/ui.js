@@ -62,7 +62,7 @@ export class UI {
     this.sheet = $('#sheet'); this.body = $('#sheet .sheet-body'); this.title = $('#sheet .sheet-title');
     this.panel = null; this.panelData = null; this.holdUntil = 0;
     this.recent = [];
-    this.craftCat = 'Logistics'; this.craftTab = 'craft'; this.statWin = '1m'; this.statTab = 'items';
+    this.craftCat = 'Ready'; this.craftTab = 'craft'; this.statWin = '1m'; this.statTab = 'items';
     this.sel = null;
     $('#sheet .close').onclick = () => this.closePanel();
     this.sheet.addEventListener('pointerdown', () => { this.holdUntil = performance.now() + 700; });
@@ -77,7 +77,7 @@ export class UI {
     $('#hotbar').addEventListener('click', (e) => { const s = e.target.closest('[data-hot]'); if (s) this.hotbarPick(+s.dataset.hot); });
     $('#craftq').addEventListener('click', (e) => { const s = e.target.closest('[data-q]'); if (s) this.app.game.cancelCraft(+s.dataset.q); });
     $('#objective').addEventListener('click', () => $('#objective').classList.toggle('open'));
-    $('#pastebar').addEventListener('click', (e) => { const b = e.target.closest('[data-paste]'); if (b) this.app.pasteAction(b.dataset.paste); });
+    $('#actionbar').addEventListener('click', (e) => { const b = e.target.closest('[data-ab]'); if (b) this.app.actionBar(b.dataset.ab); });
     $('#modal').addEventListener('click', (e) => this.onModalClick(e));
     setInterval(() => this.tick(), 250);
     this.bindGame();
@@ -142,7 +142,6 @@ export class UI {
     this.sel = null;
     document.querySelectorAll('[data-open]').forEach(b => b.classList.remove('active'));
   }
-  blurPanels() { if (this.panel === 'entity' || this.panel === 'tile') { /* keep open while panning */ } }
   renderPanel(first) {
     const fn = this['p_' + this.panel];
     if (!fn) return;
@@ -242,7 +241,7 @@ export class UI {
     const b = e.target.closest('[data-act]');
     if (b && b.tagName !== 'SELECT' && b.tagName !== 'INPUT') { this.act(b.dataset.act, b.dataset.v, b); return; }
     const it = e.target.closest('[data-item]');
-    if (it && this.panel !== 'craft') this.showRecipeInfo(it.dataset.item);
+    if (it) this.showRecipeInfo(it.dataset.item);
   }
 
   act(a, v, el) {
@@ -258,9 +257,13 @@ export class UI {
         let times = n === 'max' ? this.maxCraftable(rid) : +n;
         if (times <= 0) times = 1;
         const r = g.craft(rid, times);
-        if (!r.ok) this.toast(r.missing ? 'Missing: ' + Object.entries(r.missing).map(([k, q]) => `${fmt(q)} ${esc(nameOf(k))}`).join(', ') : r.reason, 'bad');
+        if (!r.ok) this.toast(r.missing ? 'Missing ' + Object.entries(r.missing).map(([k, q]) => `${fmt(q)} ${iconImg(k)} ${esc(nameOf(k))} — ${this.howToGet(k)}`).join('<br>') : r.reason, 'bad');
+        else this.toast(`${iconImg(Object.keys(RECIPES[rid].out)[0])} Crafting ${times}× ${esc(RECIPES[rid].name)}`);
+        if (this.panel === 'craft') { this.refreshCraft(true); return; }
         break;
       }
+      case 'cancelq': g.cancelCraft(+v); if (this.panel === 'craft') { this.refreshCraft(true); return; } break;
+      case 'iteminfo': this.showRecipeInfo(v); return;
       case 'usebuild': app.setBuild(v); this.closePanel(); return;
       case 'buildpick': {
         if (!g.has(v)) {
@@ -284,7 +287,8 @@ export class UI {
       // entity
       case 'fuel': if (e) this.addFuel(e); break;
       case 'fill': if (e) this.fillFromInv(e); break;
-      case 'take': if (e) this.takeAll(e); break;
+      case 'take': if (e) this.app.collect(e); break;
+      case 'takeone': if (e) this.takeOne(e, v); break;
       case 'rotate': if (e) { g.rotateEntity(e); this.app.renderer.setSelection(g.ents.get(e.id)); } break;
       case 'pickup': if (e) { g.removeEntity(e); this.closePanel(); return; } break;
       case 'recipe': if (e) this.pickRecipe(e); return;
@@ -321,33 +325,97 @@ export class UI {
     while (lo < hi) { const m = (lo + hi + 1) >> 1; if (this.app.game.planCraft(rid, m).steps) lo = m; else hi = m - 1; }
     return lo;
   }
-  p_craft() {
+  // How the player gets an item they can't hand-craft yet.
+  howToGet(id) {
+    if (['iron-ore', 'copper-ore', 'coal', 'stone', 'quartz', 'bauxite'].includes(id)) return 'mine it (tap ore, or build a drill)';
+    const rid = this.recipeFor(id);
+    if (!rid) return 'not available yet';
+    const r = RECIPES[rid];
+    if (!this.app.game.unlocked.has(rid)) return 'locked — research it first';
+    return { smelt: 'smelt it in a furnace', chem: 'make it in a Chemical Plant', refine: 'make it in an Oil Refinery', 'craft-fluid': 'make it in an Assembler II', craft: 'craft it' }[r.cat];
+  }
+  craftRows(list) {
+    const g = this.app.game;
+    return list.map(rid => {
+      const r = RECIPES[rid], o = Object.keys(r.out)[0];
+      const n = this.maxCraftable(rid);
+      const ings = Object.entries(r.in).map(([k, v]) => {
+        const have = g.inv[k] || 0;
+        const cls = have >= v ? '' : (this.app.game.planCraft(this.recipeFor(k) || k, 1).steps && this.recipeFor(k) && RECIPES[this.recipeFor(k)].hand ? 'auto' : 'short');
+        return `<span class="chip ${cls}" data-item="${k}" title="${esc(nameOf(k))}: have ${have}">${iconImg(k)}<b>${v}</b></span>`;
+      }).join('');
+      const out = r.out[o] > 1 ? ` <small>×${r.out[o]}</small>` : '';
+      return `<div class="crow ${n ? '' : 'none'}">${iconImg(o)}<div class="cinfo"><span class="cname">${esc(r.name)}${out} <small>· have ${fmt(g.inv[o] || 0)}${n ? ` · can make ${n >= 500 ? '500+' : n}` : ''}</small></span><span class="cings">${ings}</span></div>
+        <div class="cbtns"><button data-act="craft" data-v="${rid}:1">+1</button><button data-act="craft" data-v="${rid}:5">+5</button></div></div>`;
+    }).join('');
+  }
+  machineRows(list) {
+    return list.map(rid => {
+      const r = RECIPES[rid], o = Object.keys(r.out).find(k => ITEMS[k]) || Object.keys(r.out)[0];
+      const where = { smelt: 'Furnace', chem: 'Chemical Plant', refine: 'Oil Refinery', 'craft-fluid': 'Assembler II+' }[r.cat];
+      return `<div class="crow none" data-item="${o}">${iconImg(o)}<div class="cinfo"><span class="cname">${esc(r.name)}</span><span class="cings">${Object.entries(r.in).map(([k, v]) => chip(k, v)).join('')}</span></div><span class="cmach">needs a<br>${where}</span></div>`;
+    }).join('');
+  }
+  craftQueueHtml() {
+    const g = this.app.game;
+    return g.craftQueue.map((q, i) => {
+      const o = Object.keys(RECIPES[q.rid].out)[0];
+      return `<button class="qi" data-act="cancelq" data-v="${i}" title="Cancel">${iconImg(o)}<b>${q.n}</b>${i === 0 ? `<div class="qbar" style="width:${(q.progress * 100).toFixed(0)}%"></div>` : ''}</button>`;
+    }).join('');
+  }
+  craftListHtml() {
+    const g = this.app.game;
+    const hand = [...g.unlocked].filter(r => RECIPES[r].hand);
+    const outCat = (rid) => category(Object.keys(RECIPES[rid].out).find(k => ITEMS[k]) || 'iron-plate');
+    const q = (this.craftQuery || '').trim().toLowerCase();
+    let list, machines = [];
+    if (q) {
+      list = hand.filter(r => RECIPES[r].name.toLowerCase().includes(q));
+      machines = [...g.unlocked].filter(r => !RECIPES[r].hand && RECIPES[r].name.toLowerCase().includes(q));
+    } else if (this.craftCat === 'Ready') {
+      list = hand.filter(r => g.planCraft(r, 1).steps);
+    } else {
+      list = hand.filter(r => outCat(r) === this.craftCat);
+      machines = [...g.unlocked].filter(r => !RECIPES[r].hand && outCat(r) === this.craftCat);
+    }
+    let h = list.length ? this.craftRows(list) : `<p class="mute small pad">${this.craftCat === 'Ready' && !q ? 'Nothing can be crafted from what you carry. Mine ore by tapping it, or collect plates from a furnace (long-press it).' : 'No matching recipes.'}</p>`;
+    if (machines.length) h += `<h4>Made in machines</h4>` + this.machineRows(machines);
+    return h;
+  }
+  p_craft(_, first) {
     const g = this.app.game;
     const tabs = `<div class="tabs"><button data-act="ctab" data-v="craft" class="${this.craftTab === 'craft' ? 'on' : ''}">Crafting</button><button data-act="ctab" data-v="inv" class="${this.craftTab === 'inv' ? 'on' : ''}">Inventory</button></div>`;
     if (this.craftTab === 'inv') {
       const ids = Object.keys(g.inv).filter(k => g.inv[k] > 0).sort((a, b) => CATS.indexOf(category(a)) - CATS.indexOf(category(b)));
-      return { title: '🎒 Inventory', html: tabs + `<div class="grid inv">${ids.map(id => `<button class="cell" data-act="${ITEMS[id].place ? 'usebuild' : 'noop'}" data-v="${id}" title="${esc(nameOf(id))}">${iconImg(id)}<b>${fmt(g.inv[id])}</b></button>`).join('') || '<p class="mute">Empty</p>'}</div>` };
+      return { title: '🎒 Inventory', html: tabs + `<div class="grid inv">${ids.map(id => `<button class="cell" data-act="${ITEMS[id].place ? 'usebuild' : 'iteminfo'}" data-v="${id}" title="${esc(nameOf(id))}">${iconImg(id)}<b>${fmt(g.inv[id])}</b></button>`).join('') || '<p class="mute">Empty</p>'}</div><p class="mute small">Tap a building to place it; tap anything else to see how it's made.</p>` };
     }
-    const recipes = [...g.unlocked].filter(r => RECIPES[r].hand);
-    const cats = CATS.filter(c => recipes.some(r => category(Object.keys(RECIPES[r].out)[0]) === c));
-    if (!cats.includes(this.craftCat)) this.craftCat = cats[0];
-    const list = recipes.filter(r => category(Object.keys(RECIPES[r].out)[0]) === this.craftCat);
-    let html = tabs + `<div class="tabs small">${cats.map(c => `<button data-act="cat" data-v="${c}" class="${c === this.craftCat ? 'on' : ''}">${c}</button>`).join('')}</div>`;
-    html += `<div class="grid">${list.map(rid => {
-      const o = Object.keys(RECIPES[rid].out)[0];
-      const can = g.planCraft(rid, 1).steps;
-      return `<button class="cell ${can ? '' : 'dim'} ${this.craftSel === rid ? 'sel' : ''}" data-act="csel" data-v="${rid}" title="${esc(RECIPES[rid].name)}">${iconImg(o)}<b>${fmt(g.inv[o] || 0)}</b></button>`;
-    }).join('')}</div>`;
-    const sel = this.craftSel && RECIPES[this.craftSel]?.hand && g.unlocked.has(this.craftSel) ? this.craftSel : null;
-    if (sel) {
-      const r = RECIPES[sel];
-      const max = this.maxCraftable(sel);
-      html += `<div class="detail"><div class="dt">${iconImg(Object.keys(r.out)[0])}<div><b>${esc(r.name)}</b><small>${r.time}s · makes ${Object.entries(r.out).map(([k, v]) => v + '× ' + esc(nameOf(k))).join(', ')}</small></div></div>
-        <div class="ings">${Object.entries(r.in).map(([k, v]) => chip(k, v, (g.inv[k] || 0) >= v ? '' : 'short')).join('')}</div>
-        ${ITEMS[sel]?.place ? `<p class="mute small">${esc(BUILDINGS[sel].desc || '')}</p>` : ''}
-        <div class="row">${[1, 5, 10].map(n => `<button class="btn" data-act="craft" data-v="${sel}:${n}">×${n}</button>`).join('')}<button class="btn primary" data-act="craft" data-v="${sel}:max">All (${max})</button>${ITEMS[sel]?.place && g.inv[sel] ? `<button class="btn" data-act="usebuild" data-v="${sel}">Build</button>` : ''}</div></div>`;
-    } else html += `<p class="mute small pad">Tap a recipe. Missing intermediates are crafted automatically. Smelting and fluid recipes need machines.</p>`;
-    return { title: '🛠 Crafting', html };
+    if (first) {
+      if (!this.craftCat) this.craftCat = 'Ready';
+      const cats = ['Ready', ...CATS];
+      this.title.innerHTML = '🛠 Crafting';
+      this.body.innerHTML = tabs + `<div class="craft-top"><input id="craft-search" type="search" placeholder="Search recipes…" value="${esc(this.craftQuery || '')}" autocomplete="off"></div>
+        <div class="cq" id="craft-q"></div>
+        <div class="tabs small">${cats.map(c => `<button data-act="cat" data-v="${c}" class="${c === this.craftCat ? 'on' : ''}">${c === 'Ready' ? '✓ Ready' : c}</button>`).join('')}</div>
+        <div class="clist" id="craft-list"></div>
+        <div class="clegend"><span><i style="background:var(--line)"></i>have it</span><span><i style="background:#8a7a2a"></i>crafted automatically</span><span><i style="background:var(--bad)"></i>missing</span></div>
+        <p class="mute small">Intermediate parts are crafted for you. Tap any ingredient to see how it's made. Tap a queued item above to cancel it.</p>`;
+      this._lastHtml = null;
+      const inp = $('#craft-search');
+      inp.addEventListener('input', () => { this.craftQuery = inp.value; this.refreshCraft(true); });
+    }
+    this.refreshCraft(first);
+    return false;
+  }
+  refreshCraft(force) {
+    const ql = $('#craft-q'), cl = $('#craft-list');
+    if (!cl) return;
+    const now = performance.now();
+    if (!force && now - (this._craftT || 0) < 480) return; // the planner runs per row; keep phones cool
+    this._craftT = now;
+    const qh = this.craftQueueHtml();
+    if (ql._h !== qh) { ql.innerHTML = qh; ql._h = qh; }
+    const lh = this.craftListHtml();
+    if (force || cl._h !== lh) { cl.innerHTML = lh; cl._h = lh; }
   }
 
   // ----- build panel -----
@@ -544,11 +612,13 @@ export class UI {
       <p><b>Goal:</b> grow from a few burner drills to a sprawling automated factory, research all five data types, and activate the <b>Resonance Gate</b>.</p>
       <h4>Controls</h4>
       <ul><li><b>Inspect 👆</b>: drag to pan, tap a building to configure it, tap ore to mine by hand.</li>
-      <li><b>Build 🔨</b>: tap to place, drag to place a line. Belts and pipes follow an L-shaped path and turn corners. Belt Tunnels / Pipe Tunnels: drag from entrance to exit.</li>
-      <li><b>⟳</b> rotates. <b>Two fingers</b> pan and zoom in any tool (mouse: right-drag / wheel).</li>
-      <li><b>Copy ✂</b> drag over an area to make a blueprint; <b>Paste 📋</b> stamps it. Missing items become ghosts that build themselves as soon as you have the items.</li>
-      <li><b>Remove 🗑</b>: tap or drag a rectangle. Items are refunded.</li>
-      <li>Keyboard: WASD pan, R rotate, E craft, T research, P stats, B build, X/C/V tools, 1–9 hotbar, Space pause.</li></ul>
+      <li><b>Take items</b>: long-press any building to grab its output. Keep holding and slide across a row of furnaces to collect them all.</li>
+      <li><b>Build 🔨</b>: tap to position a ghost, then tap the ghost again (or ✓ Place) to build. Drag <i>from the ghost</i> to stretch it into a line; belts and pipes turn corners. Dragging anywhere else pans. Nothing is built until you confirm.</li>
+      <li><b>⟳</b> rotates. <b>Two fingers</b> pan and zoom in any tool (mouse: right-drag / wheel; mouse clicks place directly).</li>
+      <li><b>Remove 🗑 / Copy ✂</b>: tap a building to select it, drag from the selection to grow the box, then confirm. Items are refunded.</li>
+      <li><b>Paste 📋</b>: tap where it goes, then ✓ Place. Missing items become ghosts that build themselves once you have them.</li>
+      <li><b>Crafting 🛠</b>: "Ready" lists everything you can make right now. Each row shows its ingredients: grey = you have it, gold = crafted automatically, red = missing (tap it to see how it's made).</li>
+      <li>Keyboard: WASD pan, R rotate, Enter confirm, Esc cancel, E craft, T research, P stats, B build, X/C/V tools, 1–9 hotbar, Space pause.</li></ul>
       <h4>Mechanics</h4>
       <ul><li>Drills and inserters output toward the arrow. Inserters take from behind and drop in front, only what the target needs.</li>
       <li>Furnaces choose a recipe from their input. Assemblers need a recipe set.</li>
@@ -611,6 +681,8 @@ export class UI {
     const def = e.def;
     const [stT, stC] = STATUS_TEXT[e.status] || [e.status, 'mute'];
     let h = `<div class="status ${stC}">● ${stT}</div>`;
+    const tk = takeable(e), tkKeys = Object.keys(tk);
+    if (tkKeys.length) h += `<div class="take-top"><button class="btn take" data-act="take">⇡ Take all</button>${tkKeys.map(k => `<button class="chip" data-act="takeone" data-v="${k}" title="Take ${esc(nameOf(k))}">${iconImg(k)}<b>${fmt(tk[k])}</b></button>`).join('')}</div>`;
     const flow = ioHint(e);
     if (flow) h += `<p class="flow small">${flow}</p>`;
     else if (def.desc) h += `<p class="mute small">${esc(def.desc)}</p>`;
@@ -697,10 +769,10 @@ export class UI {
     // actions
     const acts = [];
     if (e.kind === 'assembler' || e.kind === 'furnace' || e.kind === 'lab' || e.kind === 'gate') acts.push(`<button class="btn" data-act="fill">⇣ Fill from inventory</button>`);
-    if (e.out || e.inv || e.buf) acts.push(`<button class="btn" data-act="take">⇡ Take all</button>`);
     acts.push(`<button class="btn" data-act="rotate">⟳ Rotate</button>`);
     acts.push(`<button class="btn danger" data-act="pickup">✋ Pick up</button>`);
     h += `<div class="row wrap actions">${acts.join('')}</div>`;
+    if (tkKeys.length || e.out || e.buf) h += `<p class="mute small">Tip: long-press a building on the map to take its output without opening this panel. Keep holding and slide across a row of machines to collect them all.</p>`;
     return { title: `${iconImg(e.type)} ${esc(def.name)}`, html: h };
   }
   pickRecipe(e) {
@@ -747,12 +819,13 @@ export class UI {
     if (e.def.burner && !e.fuel.n) this.addFuel(e);
     if (!any) this.toast('Nothing to insert', 'bad');
   }
-  takeAll(e) {
+  takeOne(e, id) {
     const g = this.app.game;
-    if (e.out) { g.giveAll(e.out); for (const k of Object.keys(e.out)) delete e.out[k]; }
-    if (e.inv?.items) { g.giveAll(e.inv.items); e.inv.items = {}; }
-    else if (e.kind === 'lab') { g.giveAll(e.inv); e.inv = {}; }
-    if (e.kind === 'drill') { g.giveAll(e.buf); e.buf = {}; }
+    let n = 0;
+    if (e.out?.[id]) { n += e.out[id]; delete e.out[id]; }
+    if (e.kind === 'drill' && e.buf[id]) { n += e.buf[id]; delete e.buf[id]; }
+    if (e.inv?.items?.[id] && e.kind !== 'uplink') { n += e.inv.items[id]; delete e.inv.items[id]; }
+    if (n) { g.give(id, n); this.toast(`${iconImg(id)} +${n} ${esc(nameOf(id))}`, 'good'); }
   }
   showRecipeInfo(id) {
     const g = this.app.game;
@@ -787,5 +860,14 @@ function ioHint(e) {
     case 'downlink': return `Pulls the chosen item from your inventory; inserters take it out.`;
     default: return null;
   }
+}
+// What a building holds that the player can take: products and storage, never fuel or ingredients.
+function takeable(e) {
+  const t = {};
+  const add = (k, v) => { if (v > 0) t[k] = (t[k] || 0) + v; };
+  if (e.out) for (const [k, v] of Object.entries(e.out)) add(k, v);
+  if (e.kind === 'drill') for (const [k, v] of Object.entries(e.buf)) add(k, v);
+  if (e.inv?.items && e.kind !== 'uplink') for (const [k, v] of Object.entries(e.inv.items)) add(k, v);
+  return t;
 }
 function pct(v) { return (v > 0 ? '+' : '') + Math.round(v * 100) + '%'; }
