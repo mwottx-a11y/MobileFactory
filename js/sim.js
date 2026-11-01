@@ -5,7 +5,9 @@ import { World, ORES, OIL } from './world.js';
 export const TICK = 1 / 30;
 export const DX = [0, 1, 0, -1], DY = [-1, 0, 1, 0];
 const SP = 0.25; // belt item spacing in tiles
-const DRILL_BUF = 10; // mined items a drill holds before it stops
+const DRILL_BUF = 10;
+const AUTO_FUEL = 10; // inserters top fuel up to this many items
+export const holdCap = (id) => 2 * (ITEMS[id]?.stack || 50); // buildings hold two full stacks of each input // mined items a drill holds before it stops
 const DROP_POS = [0.5, 0.375, 0.625, 0.25, 0.75, 0.125, 0.875];
 const STEAM_KJ = 30; // energy per unit of steam
 
@@ -100,17 +102,24 @@ export class Entity {
     return this.net ? this.net.sat : 0;
   }
   noEnergyStatus() { return this.def.burner ? 'no fuel' : 'no power'; }
-  fuelWants(id) {
+  // Capacity vs. top-up: a building can *hold* two full stacks of each fuel and ingredient (room),
+  // but inserters only top it up to a small working buffer (wants) so one belt feeds a whole row fairly.
+  fuelRoom(id) {
     if (!this.def.burner || !ITEMS[id]?.fuel) return 0;
     if (this.fuel.id && this.fuel.id !== id) return 0;
-    return Math.max(0, 10 - this.fuel.n);
+    return Math.max(0, holdCap(id) - this.fuel.n);
+  }
+  fuelWants(id) {
+    const room = this.fuelRoom(id);
+    return room ? Math.min(room, Math.max(0, AUTO_FUEL - (this.fuel.id === id ? this.fuel.n : 0))) : 0;
   }
   fuelInsert(id, n) {
-    const k = Math.min(n, this.fuelWants(id));
+    const k = Math.min(n, this.fuelRoom(id));
     if (k > 0) { this.fuel.id = id; this.fuel.n += k; }
     return k;
   }
   wants(id) { return this.fuelWants(id); }
+  room(id) { return this.fuelRoom(id); }
   insert(id, n) { return this.fuelInsert(id, n); }
   extract() { return null; }
   // Items to return to the player on removal.
@@ -238,6 +247,7 @@ class Inserter extends Entity {
 class Chest extends Entity {
   constructor(g, type, x, y, rot) { super(g, type, x, y, rot); this.inv = new Inventory(this.def.slots || 16); this.filter = null; this.target = 50; }
   wants(id) { return id ? this.inv.space(id) : 9999; }
+  room(id) { return this.inv.space(id); }
   insert(id, n) { return this.inv.add(id, n); }
   extract(want, max) {
     for (const [id, n] of Object.entries(this.inv.items)) {
@@ -301,11 +311,17 @@ class Crafter extends Entity {
     if (!id || !this.recipe) return 0;
     const need = RECIPES[this.recipe].in[id];
     if (!need || isFluid(id)) return 0;
-    return Math.max(0, this.inLimit(id, need) - (this.inp[id] || 0));
+    return Math.max(0, Math.min(this.inLimit(id, need), holdCap(id)) - (this.inp[id] || 0));
+  }
+  room(id) {
+    const f = this.fuelRoom(id); if (f) return f;
+    if (!id || !this.recipe) return 0;
+    if (!RECIPES[this.recipe].in[id] || isFluid(id)) return 0;
+    return Math.max(0, holdCap(id) - (this.inp[id] || 0));
   }
   insert(id, n) {
     const f = this.fuelInsert(id, n); if (f) return f;
-    const k = Math.min(n, this.wants(id));
+    const k = Math.min(n, this.room(id));
     if (k > 0) addTo(this.inp, id, k);
     return k;
   }
@@ -399,9 +415,20 @@ class Furnace extends Crafter {
     const rid = this.smeltFor(id);
     return rid ? RECIPES[rid].in[id] * 3 : 0;
   }
+  // Can this furnace take `id` now — same recipe, or empty enough to switch to it?
+  canSmelt(id) {
+    if (this.recipe && RECIPES[this.recipe].in[id]) return true;
+    if (this.recipe && (this.crafting || Object.keys(this.inp).length || Object.keys(this.out).length)) return false;
+    return !!this.smeltFor(id);
+  }
+  room(id) {
+    const f = this.fuelRoom(id); if (f) return f;
+    if (!id || !this.canSmelt(id)) return 0;
+    return Math.max(0, holdCap(id) - (this.inp[id] || 0));
+  }
   insert(id, n) {
     const f = this.fuelInsert(id, n); if (f) return f;
-    const k = Math.min(n, this.wants(id));
+    const k = Math.min(n, this.room(id));
     if (k <= 0) return 0;
     if (!this.recipe || !RECIPES[this.recipe].in[id]) this.recipe = this.smeltFor(id);
     addTo(this.inp, id, k);
@@ -415,8 +442,9 @@ class Furnace extends Crafter {
 
 class Lab extends Entity {
   constructor(g, type, x, y, rot) { super(g, type, x, y, rot); this.inv = {}; this.progress = 0; this.unit = null; }
-  wants(id) { return id && PACKS.includes(id) ? Math.max(0, 10 - (this.inv[id] || 0)) : 0; }
-  insert(id, n) { const k = Math.min(n, this.wants(id)); if (k > 0) addTo(this.inv, id, k); return k; }
+  wants(id) { return id && PACKS.includes(id) ? Math.max(0, Math.min(10, holdCap(id)) - (this.inv[id] || 0)) : 0; }
+  room(id) { return id && PACKS.includes(id) ? Math.max(0, holdCap(id) - (this.inv[id] || 0)) : 0; }
+  insert(id, n) { const k = Math.min(n, this.room(id)); if (k > 0) addTo(this.inv, id, k); return k; }
   // Inserters can pass data on from one lab to the next.
   extract(want, max) {
     for (const [id, n] of Object.entries(this.inv)) {
@@ -595,6 +623,7 @@ class UPipe extends Entity {
 class Gate extends Entity {
   constructor(g, type, x, y, rot) { super(g, type, x, y, rot); this.cores = 0; this.charge = 0; }
   wants(id) { return id === 'resonator-core' ? Math.max(0, this.def.need - this.cores) : 0; }
+  room(id) { return this.wants(id); }
   insert(id, n) { const k = Math.min(n, this.wants(id)); this.cores += k; return k; }
   contents() { return this.cores ? { 'resonator-core': this.cores } : {}; }
   tick(g) {

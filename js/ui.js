@@ -1,7 +1,7 @@
 // DOM user interface: HUD, panels, research tree, stats, planner.
 import { ITEMS, FLUIDS, RECIPES, BUILDINGS, TECHS, PACKS, isFluid, nameOf, colorOf } from './data.js';
 import { ORES, OIL } from './world.js';
-import { BELTLIKE } from './sim.js';
+import { BELTLIKE, holdCap } from './sim.js';
 import { iconURL, iconImg, techIcon } from './icons.js';
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -621,6 +621,7 @@ export class UI {
       <li>Keyboard: WASD pan, R rotate, Enter confirm, Esc cancel, E craft, T research, P stats, B build, X/C/V tools, 1–9 hotbar, Space pause.</li></ul>
       <h4>Mechanics</h4>
       <ul><li>Drills and inserters output toward the arrow. Inserters take from behind and drop in front, only what the target needs.</li>
+      <li>Every machine holds up to <b>two full stacks</b> of each ingredient and of fuel — handy for hand-feeding with "Fill from inventory". Inserters only keep a small working supply topped up, so one belt can feed a long row of machines fairly.</li>
       <li>Furnaces choose a recipe from their input. Assemblers need a recipe set.</li>
       <li>Burner machines need fuel (coal, tar, solid fuel). Electric ones need a Utility Pole covering them, linked to generators.</li>
       <li><b>Arrow colours:</b> <span style="color:#2fd0ff">cyan</span> marks where things go in, <span style="color:#ff8a1f">orange</span> where they come out — on inserters, drill chutes, tunnels, splitters and every fluid port. Selecting or placing a building also highlights the exact tiles it reads from and writes to.</li>
@@ -699,6 +700,7 @@ export class UI {
       h += `<div class="io"><div>${Object.entries(r.in).map(([k, v]) => chip(k, isFluid(k) ? (e.fin[k] || 0) : (e.inp[k] || 0), ((isFluid(k) ? e.fin[k] : e.inp[k]) || 0) >= v ? '' : 'short') + `<small class="per">${v}</small>`).join('')}</div><span class="arrow">→</span><div>${Object.entries(r.out).map(([k, v]) => chip(k, isFluid(k) ? (e.fout[k] || 0) : (e.out[k] || 0)) + `<small class="per">${v}</small>`).join('')}</div></div>`;
       h += `<div class="bar big"><div style="width:${(e.progress * 100).toFixed(0)}%"></div></div>`;
       h += `<p class="mute small">${fmt(perMin)} crafts/min at speed ${fmt(spd)}${e.eff.prod > 0 && r.prodOk ? ` · +${Math.round(e.eff.prod * 100)}% productivity` : ''}</p>`;
+      h += `<p class="mute small">Holds up to two stacks of each ingredient${def.burner ? ' and of fuel' : ''} (Fill from inventory). Inserters keep a smaller working supply topped up so a belt feeds a whole row evenly.</p>`;
     }
     if (e.kind === 'drill') {
       const W = g.world; let left = 0, types = {};
@@ -721,7 +723,7 @@ export class UI {
     if (e.kind === 'gate') h += `<div class="ings">${chip('resonator-core', e.cores)}</div><p>Cores ${e.cores}/${def.need} · Resonance ${Math.round(e.charge * 100)}%</p><div class="bar big"><div style="width:${e.charge * 100}%"></div></div>`;
     // fuel
     if (def.burner) {
-      h += `<div class="row">${e.fuel.n ? chip(e.fuel.id, e.fuel.n) : '<span class="bad small">No fuel</span>'}<button class="btn" data-act="fuel">🔥 Add fuel</button></div>`;
+      h += `<div class="row">${e.fuel.n ? chip(e.fuel.id, e.fuel.n) + `<span class="mute small">/ ${holdCap(e.fuel.id)}</span>` : '<span class="bad small">No fuel</span>'}<button class="btn" data-act="fuel">🔥 Add fuel</button></div>`;
     }
     // modules
     if (e.modules) {
@@ -797,27 +799,27 @@ export class UI {
       this.renderPanel(true);
     }, false);
   }
-  addFuel(e) {
+  addFuel(e, quiet) {
     const g = this.app.game;
     const fuels = Object.keys(g.inv).filter(k => ITEMS[k]?.fuel && (!e.fuel.id || e.fuel.id === k)).sort((a, b) => ITEMS[b].fuel - ITEMS[a].fuel);
-    if (!fuels.length) { this.toast('No fuel in inventory — mine some coal', 'bad'); return; }
+    if (!fuels.length) { if (!quiet) this.toast('No fuel in inventory — mine some coal', 'bad'); return 0; }
     const id = fuels[0];
-    const k = e.fuelInsert(id, Math.min(g.inv[id], 10));
+    const k = e.fuelInsert(id, g.inv[id]);
     g.take(id, k);
-    if (!k) this.toast('Fuel slot full');
+    if (!k && !quiet) this.toast(`Fuel is full (${holdCap(id)} ${esc(nameOf(id))})`);
+    return k;
   }
   fillFromInv(e) {
     const g = this.app.game;
     let any = 0;
-    const ids = e.kind === 'lab' ? PACKS : e.kind === 'gate' ? ['resonator-core'] : e.recipe ? Object.keys(RECIPES[e.recipe].in) : Object.keys(g.inv).filter(k => e.wants(k) > 0);
+    const ids = e.kind === 'lab' ? PACKS : e.kind === 'gate' ? ['resonator-core'] : e.recipe ? Object.keys(RECIPES[e.recipe].in) : Object.keys(g.inv).filter(k => e.room(k) > 0 && !ITEMS[k]?.fuel);
     for (const id of ids) {
       if (isFluid(id) || !g.inv[id]) continue;
-      const w = e.wants(id);
-      const k = e.insert(id, Math.min(w, g.inv[id]));
+      const k = e.insert(id, Math.min(e.room(id), g.inv[id]));
       if (k) { g.take(id, k); any += k; }
     }
-    if (e.def.burner && !e.fuel.n) this.addFuel(e);
-    if (!any) this.toast('Nothing to insert', 'bad');
+    if (e.def.burner) any += this.addFuel(e, true);
+    if (!any) this.toast('Nothing to insert — it is full, or you carry none of its ingredients', 'bad');
   }
   takeOne(e, id) {
     const g = this.app.game;
